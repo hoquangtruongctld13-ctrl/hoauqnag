@@ -1,0 +1,5 @@
+# Python TTS App - Dependencies
+# Install with: pip install -r requirements.txt
+
+requests>=2.28.0
+pygame>=2.5.0
