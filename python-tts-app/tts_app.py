@@ -22,6 +22,7 @@ import threading
 import base64
 import os
 import tempfile
+import time
 from typing import Optional
 
 # Try to import required libraries
@@ -32,15 +33,29 @@ except ImportError:
 
 try:
     import pygame
-    pygame.mixer.init()
     PYGAME_AVAILABLE = True
 except ImportError:
     PYGAME_AVAILABLE = False
+    pygame = None
+
+# Initialize pygame mixer lazily when needed
+_pygame_initialized = False
+
+def _init_pygame():
+    """Initialize pygame mixer lazily to avoid issues on systems without audio"""
+    global _pygame_initialized
+    if PYGAME_AVAILABLE and not _pygame_initialized:
+        try:
+            pygame.mixer.init()
+            _pygame_initialized = True
+        except Exception:
+            pass
 
 
 # Constants - matching the original source code
 GOOGLE_LABS_API_URL = "https://labs.google/lll/api/text-to-speech"
 MAX_CHARACTERS = 600
+API_TIMEOUT = 30  # seconds - reasonable timeout for user experience
 
 # Languages - from text-to-speech.tsx
 LANGUAGES = [
@@ -399,12 +414,13 @@ class TextToSpeechApp:
         text = self.text_input.get("1.0", tk.END).strip()
         char_count = len(text)
         
-        # Enforce character limit
+        # Enforce character limit with notification
         if char_count > MAX_CHARACTERS:
-            # Truncate text
+            # Truncate text and notify user
             self.text_input.delete("1.0", tk.END)
             self.text_input.insert("1.0", text[:MAX_CHARACTERS])
             char_count = MAX_CHARACTERS
+            self.status_label.config(text=f"⚠️ Text truncated to {MAX_CHARACTERS} characters limit.")
             
         # Update counter with color indication
         self.char_counter.config(text=f"{char_count} / {MAX_CHARACTERS} chars")
@@ -522,7 +538,7 @@ class TextToSpeechApp:
                 GOOGLE_LABS_API_URL,
                 headers=headers,
                 json=payload,
-                timeout=60
+                timeout=API_TIMEOUT
             )
             
             if response.status_code != 200:
@@ -538,8 +554,9 @@ class TextToSpeechApp:
             else:
                 raise Exception("Unexpected response format from API")
                 
-            # Save to temp file
-            audio_path = os.path.join(self.temp_dir, f"speech_{id(self)}.mp3")
+            # Save to temp file with timestamp for unique filename
+            timestamp = int(time.time() * 1000)
+            audio_path = os.path.join(self.temp_dir, f"speech_{timestamp}.mp3")
             with open(audio_path, 'wb') as f:
                 f.write(audio_bytes)
                 
@@ -598,6 +615,8 @@ class TextToSpeechApp:
             return
             
         try:
+            # Initialize pygame mixer lazily
+            _init_pygame()
             pygame.mixer.music.load(self.current_audio_path)
             pygame.mixer.music.play()
             self.status_label.config(text="🔊 Playing audio...")
@@ -616,11 +635,15 @@ class TextToSpeechApp:
             messagebox.showwarning("Warning", "No audio to download. Generate speech first.")
             return
             
+        # Generate user-friendly filename with timestamp
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        default_filename = f"generated_speech_{timestamp}.mp3"
+        
         # Open save dialog
         file_path = filedialog.asksaveasfilename(
             defaultextension=".mp3",
             filetypes=[("MP3 files", "*.mp3"), ("All files", "*.*")],
-            initialfile=f"speech_{id(self)}.mp3"
+            initialfile=default_filename
         )
         
         if file_path:
